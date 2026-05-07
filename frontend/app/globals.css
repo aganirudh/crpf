@@ -1,6 +1,9 @@
+/* ─── Google Font ─────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
 @import "tailwindcss";
 
-/* shadcn/ui design tokens — neutral govt-friendly palette. */
+/* shadcn/ui design tokens — premium PRAMAAN dark palette. */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -12,7 +15,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
-    --primary: 224 76% 32%;
+    --primary: 224 76% 48%;
     --primary-foreground: 210 40% 98%;
 
     --secondary: 210 40% 96%;
@@ -29,35 +32,42 @@
 
     --border: 214 32% 91%;
     --input: 214 32% 91%;
-    --ring: 224 76% 32%;
+    --ring: 224 76% 48%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
 
     /* PRAMAAN verdict palette */
     --verdict-eligible: 142 71% 35%;
     --verdict-not-eligible: 0 72% 50%;
     --verdict-manual-review: 38 92% 50%;
+    --verdict-pending: 210 40% 60%;
+
+    /* Status colors */
+    --status-pass: 142 71% 45%;
+    --status-fail: 0 72% 50%;
+    --status-review: 38 92% 50%;
+    --status-pending: 220 13% 60%;
   }
 
   .dark {
-    --background: 222 47% 6%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 8%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 8%;
-    --popover-foreground: 210 40% 98%;
+    --background: 224 47% 5%;
+    --foreground: 210 40% 96%;
+    --card: 224 47% 7%;
+    --card-foreground: 210 40% 96%;
+    --popover: 224 47% 7%;
+    --popover-foreground: 210 40% 96%;
     --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 63% 31%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 217 33% 12%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 217 33% 12%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 217 33% 14%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 63% 40%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 17%;
-    --input: 217 33% 17%;
+    --border: 217 33% 14%;
+    --input: 217 33% 14%;
     --ring: 217 91% 60%;
   }
 }
@@ -85,6 +95,10 @@
   --color-verdict-eligible: hsl(var(--verdict-eligible));
   --color-verdict-not-eligible: hsl(var(--verdict-not-eligible));
   --color-verdict-manual-review: hsl(var(--verdict-manual-review));
+  --color-status-pass: hsl(var(--status-pass));
+  --color-status-fail: hsl(var(--status-fail));
+  --color-status-review: hsl(var(--status-review));
+  --color-status-pending: hsl(var(--status-pending));
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -97,5 +111,205 @@
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-feature-settings: "rlig" 1, "calt" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Custom scrollbar ────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* ─── Animations ──────────────────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px hsl(var(--primary) / 0.2); }
+  50% { box-shadow: 0 0 40px hsl(var(--primary) / 0.4); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes countUp {
+  from { opacity: 0; transform: scale(0.5); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s ease-out forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.4s ease-out forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+.animate-count-up {
+  animation: countUp 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.stagger-1 { animation-delay: 0.1s; opacity: 0; }
+.stagger-2 { animation-delay: 0.2s; opacity: 0; }
+.stagger-3 { animation-delay: 0.3s; opacity: 0; }
+.stagger-4 { animation-delay: 0.4s; opacity: 0; }
+.stagger-5 { animation-delay: 0.5s; opacity: 0; }
+
+/* ─── Glassmorphism utility ───────────────────────────────────────────── */
+.glass {
+  background: hsl(var(--card) / 0.6);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+
+.glass-strong {
+  background: hsl(var(--card) / 0.85);
+  backdrop-filter: blur(30px) saturate(200%);
+  -webkit-backdrop-filter: blur(30px) saturate(200%);
+  border: 1px solid hsl(var(--border) / 0.4);
+}
+
+/* ─── Gradient backgrounds ────────────────────────────────────────────── */
+.gradient-mesh {
+  background:
+    radial-gradient(at 27% 37%, hsl(215, 98%, 61%, 0.15) 0px, transparent 50%),
+    radial-gradient(at 97% 21%, hsl(125, 98%, 72%, 0.08) 0px, transparent 50%),
+    radial-gradient(at 52% 99%, hsl(354, 98%, 61%, 0.08) 0px, transparent 50%),
+    radial-gradient(at 10% 29%, hsl(256, 96%, 67%, 0.1) 0px, transparent 50%);
+}
+
+/* ─── Premium card hover ──────────────────────────────────────────────── */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px hsl(var(--primary) / 0.15);
+}
+
+/* ─── Sidebar ─────────────────────────────────────────────────────────── */
+.sidebar-nav-item {
+  transition: all 0.2s ease;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  position: relative;
+}
+.sidebar-nav-item:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+.sidebar-nav-item.active {
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  font-weight: 600;
+}
+.sidebar-nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 25%;
+  height: 50%;
+  width: 3px;
+  background: hsl(var(--primary));
+  border-radius: 0 2px 2px 0;
+}
+
+/* ─── Status indicators ───────────────────────────────────────────────── */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.pass { background: hsl(var(--status-pass)); box-shadow: 0 0 8px hsl(var(--status-pass) / 0.5); }
+.status-dot.fail { background: hsl(var(--status-fail)); box-shadow: 0 0 8px hsl(var(--status-fail) / 0.5); }
+.status-dot.review { background: hsl(var(--status-review)); box-shadow: 0 0 8px hsl(var(--status-review) / 0.5); }
+.status-dot.pending { background: hsl(var(--status-pending)); }
+
+/* ─── JSON viewer ─────────────────────────────────────────────────────── */
+.json-viewer {
+  background: hsl(var(--card));
+  border-radius: 0.5rem;
+  padding: 1rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border));
+}
+.json-key { color: hsl(210, 90%, 70%); }
+.json-string { color: hsl(120, 60%, 60%); }
+.json-number { color: hsl(35, 90%, 65%); }
+.json-boolean { color: hsl(280, 70%, 70%); }
+.json-null { color: hsl(var(--muted-foreground)); }
+
+/* ─── Progress ring ───────────────────────────────────────────────────── */
+.progress-ring-circle {
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
 }

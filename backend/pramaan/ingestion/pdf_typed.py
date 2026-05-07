@@ -20,6 +20,54 @@ def parse_typed_pdf(data: bytes) -> list[PageBlock]:
     blocks: list[PageBlock] = []
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         for page_idx, page in enumerate(pdf.pages, start=1):
+            # 1) Table extraction (critical for tenders where eligibility criteria
+            #    and document checklists are presented as grids).
+            try:
+                tables = page.find_tables(
+                    table_settings={
+                        "vertical_strategy": "lines",
+                        "horizontal_strategy": "lines",
+                        "intersection_tolerance": 5,
+                        "snap_tolerance": 3,
+                        "join_tolerance": 3,
+                        "edge_min_length": 10,
+                        "min_words_vertical": 1,
+                        "min_words_horizontal": 1,
+                    }
+                )
+            except Exception as exc:  # pragma: no cover
+                log.debug("pdfplumber table detection failed: %s", exc)
+                tables = []
+
+            for t in tables:
+                try:
+                    rows = t.extract() or []
+                except Exception:
+                    continue
+                # Emit one block per non-empty row.
+                for row in rows:
+                    if not row:
+                        continue
+                    cells = [("" if c is None else str(c)).strip() for c in row]
+                    if not any(cells):
+                        continue
+                    text = " | ".join(c for c in cells if c)
+                    if not text:
+                        continue
+                    x0, top, x1, bottom = map(float, t.bbox)
+                    blocks.append(
+                        PageBlock(
+                            page=page_idx,
+                            text=text,
+                            bbox=(x0, float(top), x1, float(bottom)),
+                            ocr_conf=1.0,
+                            extractor="pdfplumber:table",
+                            source_text_sha256=hash_text(text),
+                            extra={"table_cells": cells},
+                        )
+                    )
+
+            # 2) Word-flow text (works well for paragraphs/headings).
             words = page.extract_words(use_text_flow=True, keep_blank_chars=False) or []
             # Group consecutive words into "lines" by y-coordinate proximity.
             for line in _group_lines(words):

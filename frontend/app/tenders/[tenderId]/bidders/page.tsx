@@ -97,10 +97,10 @@ export default function BiddersPage() {
   });
 
   const uploadDocs = useMutation({
-    mutationFn: async (files: FileList) => {
+    mutationFn: async (files: File[]) => {
       if (!selectedId) throw new Error("Select a bidder first.");
       let n = 0;
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         const fd = new FormData();
         fd.append("file", file);
         await api.uploadDocument(selectedId, fd);
@@ -286,12 +286,13 @@ export default function BiddersPage() {
               <input
                 ref={fileRef}
                 type="file"
+                accept=".pdf,application/pdf,.doc,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xls,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/*"
                 multiple
                 className="hidden"
                 onChange={(e) => {
-                  const files = e.target.files;
+                  const files = e.target.files ? Array.from(e.target.files) : [];
                   e.target.value = "";
-                  if (files?.length) uploadDocs.mutate(files);
+                  if (files.length) uploadDocs.mutate(files);
                 }}
               />
               <div className="flex flex-wrap gap-3">

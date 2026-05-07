@@ -15,9 +15,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    _HERE = Path(__file__).resolve()
+    _BACKEND_DIR = _HERE.parents[1]  # .../backend
+    _REPO_ROOT = _HERE.parents[2]  # .../crpf
+
     model_config = SettingsConfigDict(
         env_prefix="PRAMAAN_",
-        env_file=(".env", "../.env"),
+        # Use absolute paths so starting uvicorn from different working
+        # directories still picks up the intended .env.
+        env_file=(
+            str(_BACKEND_DIR / ".env"),
+            str(_REPO_ROOT / ".env"),
+        ),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -31,7 +40,7 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:3000"
 
     # ─── Postgres ─────────────────────────────────────────────────────────
-    db_url: str = "postgresql+psycopg://pramaan:pramaan@localhost:5432/pramaan"
+    db_url: str = "postgresql+psycopg://pramaan:pramaan@localhost:5433/pramaan"
 
     # ─── S3 / MinIO ───────────────────────────────────────────────────────
     s3_endpoint: str = "http://localhost:9000"
@@ -48,6 +57,9 @@ class Settings(BaseSettings):
     opa_url: str = "http://localhost:8181"
 
     # ─── LLM ──────────────────────────────────────────────────────────────
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash-preview-image-generation"
+    
     llm_provider: str = "openrouter"
     llm_base_url: str = "https://openrouter.ai/api/v1"
     llm_api_key: str = ""
@@ -59,6 +71,13 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 4096
     llm_timeout_s: int = 120
     llm_mock: bool = False
+    """If True, never calls an upstream LLM (uses deterministic stubs)."""
+
+    llm_send_seed: bool = True
+    """Some OpenAI-compatible gateways reject `seed`; disable if you see 400s."""
+
+    openrouter_http_referer: str = ""
+    """Optional `HTTP-Referer` for OpenRouter (`HTTP-Referer` analytics header); defaults to `frontend_origin`."""
 
     # ─── OCR ──────────────────────────────────────────────────────────────
     tesseract_path: str = ""
@@ -82,8 +101,26 @@ class Settings(BaseSettings):
 
     @property
     def is_mock_llm(self) -> bool:
-        """True when no API key was provided OR mock mode forced."""
-        return self.llm_mock or not self.llm_api_key.strip()
+        """True when mock forced, key missing, or key still looks like a template."""
+        if self.llm_mock:
+            return True
+        key = self.llm_api_key.strip()
+        if not key:
+            return True
+        # `.env.example` ships `sk-or-v1-REPLACE_ME` — non-empty but unusable; don't hammer the provider with 401s.
+        k = key.lower()
+        placeholders = (
+            "replace_me",
+            "replace-me",
+            "changeme",
+            "paste_your",
+            "your_key_here",
+            "your-api-key",
+            "insert_api_key",
+        )
+        if any(p in k for p in placeholders):
+            return True
+        return False
 
 
 @lru_cache(maxsize=1)

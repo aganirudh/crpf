@@ -32,7 +32,7 @@ def fake_extract[T: BaseModel](model: type[T], *, system: str, user: str) -> T:
     name = model.__name__
 
     if name == "CriterionDSL":
-        return _sample_criterion_dsl(model)  # type: ignore[return-value]
+        return _sample_criterion_dsl(model, user_prompt=user)  # type: ignore[return-value]
 
     if name == "DocumentExtraction":
         return _sample_document_extraction(model, user_prompt=user)  # type: ignore[return-value]
@@ -50,8 +50,22 @@ def fake_chat(*, system: str, user: str) -> str:
 # ─── Internals ────────────────────────────────────────────────────────────
 
 
-def _sample_criterion_dsl(model: type[BaseModel]) -> BaseModel:
-    """The brief's 4-criterion construction-tender sample DSL."""
+def _sample_criterion_dsl(model: type[BaseModel], *, user_prompt: str = "") -> BaseModel:
+    """Mock CriterionDSL.
+
+    If the Cartographer prompt includes tender text, we try a tiny heuristic
+    pass to make the mock responsive to the input (so it doesn't feel
+    hardcoded). If heuristics fail, fall back to the brief's 4-criterion
+    sample so the demo still works offline.
+    """
+    tender_text = _extract_between(
+        user_prompt, start="--- TENDER TEXT BEGINS ---", end="--- TENDER TEXT ENDS ---"
+    )
+    derived = _derive_minimal_dsl_from_text(tender_text) if tender_text.strip() else None
+    if derived is not None:
+        return model.model_validate(derived)
+
+    # Fallback: the brief's 4-criterion construction-tender sample DSL.
     sample: dict[str, Any] = {
         "dsl_version": "v1",
         "tender": {
@@ -156,6 +170,150 @@ def _sample_criterion_dsl(model: type[BaseModel]) -> BaseModel:
 
 _FILENAME_RE = re.compile(r"^Document filename:\s*(.+)$", re.MULTILINE)
 _PAGE_MARKER = re.compile(r"\[PAGE\s+(\d+)\]")
+
+
+def _extract_between(text: str, *, start: str, end: str) -> str:
+    a = text.find(start)
+    b = text.find(end)
+    if a == -1 or b == -1 or b <= a:
+        return ""
+    return text[a + len(start) : b]
+
+
+def _derive_minimal_dsl_from_text(tender_text: str) -> dict[str, Any] | None:
+    """Very small heuristic DSL builder for mock mode.
+
+    Goal: avoid "hardcoded" feel in demos when `PRAMAAN_LLM_MOCK=1`, while
+    keeping behavior deterministic and safe.
+    """
+    txt = tender_text
+    low = tender_text.lower()
+
+    criteria: list[dict[str, Any]] = []
+    vocab: dict[str, Any] = {}
+
+    # Turnover threshold (best-effort): look for "turnover" near a rupee figure.
+    # We reuse the rupee regex; conversion to INR integer is done in a tiny mapper.
+    turnover_val = None
+    if "turnover" in low:
+        m = _RS_NUMBER_RE.search(txt)
+        if m:
+            turnover_val = _rupee_phrase_to_inr_int(m.group(0))
+    if turnover_val is not None:
+        criteria.append(
+            {
+                "id": "C1",
+                "type": "financial",
+                "mandatory": True,
+                "mandatory_confidence": 0.85,
+                "text": "Minimum annual turnover (derived in mock mode)",
+                "constraint": {
+                    "kind": "scalar",
+                    "field": "annual_turnover_inr",
+                    "op": ">=",
+                    "value": turnover_val,
+                    "window": {"last_n_fy": 3, "aggregator": "any"},
+                },
+                "evidence_required": ["audited_financial_statement", "ca_certificate"],
+                "validators": ["icai_udin_lookup"],
+                "cross_check": [],
+                "escape_hatch": False,
+            }
+        )
+        vocab["audited_financial_statement"] = {
+            "aliases": ["audited", "balance sheet", "financial statement"],
+            "expected_fields": ["annual_turnover_inr", "fy", "auditor_name"],
+        }
+        vocab["ca_certificate"] = {
+            "aliases": ["ca certificate", "turnover certificate", "udin"],
+            "expected_fields": ["annual_turnover_inr", "fy", "ca_name", "udin"],
+        }
+
+    # GST
+    if "gst" in low or "gstin" in low:
+        criteria.append(
+            {
+                "id": f"C{len(criteria)+1}",
+                "type": "compliance",
+                "mandatory": True,
+                "mandatory_confidence": 0.9,
+                "text": "Valid GST registration (derived in mock mode)",
+                "constraint": {
+                    "kind": "scalar",
+                    "field": "gstin",
+                    "op": "regex_match + active_on(today)",
+                    "value": r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]{3}$",
+                },
+                "evidence_required": ["gst_registration_certificate"],
+                "validators": ["gstn_api_lookup"],
+                "cross_check": [],
+                "escape_hatch": False,
+            }
+        )
+        vocab["gst_registration_certificate"] = {
+            "aliases": ["gst", "reg-06", "gst rc"],
+            "expected_fields": ["gstin", "legal_name", "registration_date"],
+        }
+
+    # ISO 9001
+    if "iso" in low and "9001" in low:
+        criteria.append(
+            {
+                "id": f"C{len(criteria)+1}",
+                "type": "certification",
+                "mandatory": True,
+                "mandatory_confidence": 0.85,
+                "text": "ISO 9001 certification (derived in mock mode)",
+                "constraint": {
+                    "kind": "scalar",
+                    "field": "iso_9001",
+                    "op": "exists + valid_on(today) + accredited_by_iaf_mla",
+                },
+                "evidence_required": ["iso_certificate"],
+                "validators": ["iso_accreditation_body_lookup"],
+                "cross_check": [],
+                "escape_hatch": False,
+            }
+        )
+        vocab["iso_certificate"] = {
+            "aliases": ["iso", "qms", "9001"],
+            "expected_fields": ["issuer", "cert_no", "issued", "valid_to", "iso_standard"],
+        }
+
+    if not criteria:
+        return None
+
+    return {
+        "dsl_version": "v1",
+        "tender": {
+            "id": "T-MOCK-DERIVED",
+            "source_sha256": "0" * 64,
+            "classification": None,
+            "language": "en",
+            "pages": None,
+        },
+        "criteria": criteria,
+        "evidence_vocabulary": vocab,
+    }
+
+
+def _rupee_phrase_to_inr_int(phrase: str) -> int | None:
+    """Convert a substring like 'Rs. 5 crore' or '₹ 50,00,000' to INR int."""
+    m = _RS_NUMBER_RE.search(phrase)
+    if not m:
+        return None
+    num_raw = (m.group(1) or "").replace(",", "").strip()
+    try:
+        base = float(num_raw)
+    except Exception:
+        return None
+    unit = (m.group(2) or "").lower().strip(". ").replace(" ", "")
+    mult = 1.0
+    if unit in ("crore", "cr"):
+        mult = 1e7
+    elif unit in ("lakh", "lakhs", "lac", "lacs"):
+        mult = 1e5
+    return int(base * mult)
 
 
 def _sample_document_extraction(model: type[BaseModel], *, user_prompt: str) -> BaseModel:

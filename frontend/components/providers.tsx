@@ -5,6 +5,8 @@ import { ThemeProvider } from "next-themes";
 import * as React from "react";
 import { Toaster } from "sonner";
 
+import { AuthProvider } from "@/components/auth-provider";
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -17,9 +19,11 @@ const queryClient = new QueryClient({
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-        {children}
-        <Toaster richColors position="top-right" />
+      <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+        <AuthProvider>
+          {children}
+          <Toaster richColors position="top-right" />
+        </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );

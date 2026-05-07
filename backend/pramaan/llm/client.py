@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
@@ -77,11 +78,25 @@ class LLMClient:
     def __init__(self) -> None:
         self.mock = settings.is_mock_llm
         if self.mock:
-            log.info("LLM client running in MOCK mode (no API key, or LLM_MOCK=1)")
+            log.info(
+                "LLM client in MOCK mode — using deterministic stubs "
+                "(empty/template API key or PRAMAAN_LLM_MOCK=1)."
+            )
             self._client: OpenAI | None = None
             self._instructor: Any | None = None
         else:
-            base = OpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+            client_kw: dict[str, Any] = {
+                "base_url": settings.llm_base_url,
+                "api_key": settings.llm_api_key,
+            }
+            # OpenRouter recommends these headers for rankings / fewer odd failures with some SDK paths.
+            if "openrouter.ai" in settings.llm_base_url.lower():
+                referer = settings.openrouter_http_referer.strip() or settings.frontend_origin
+                client_kw["default_headers"] = {
+                    "HTTP-Referer": referer,
+                    "X-Title": "PRAMAAN",
+                }
+            base = OpenAI(**client_kw)
             self._client = base
             self._instructor = instructor.from_openai(base, mode=instructor.Mode.JSON)
 
@@ -119,20 +134,67 @@ class LLMClient:
             return LLMResult(value=value, model=f"mock://{chosen_model}", prompt_hash=ph)
 
         assert self._instructor is not None
-        value = self._instructor.chat.completions.create(
-            model=chosen_model,
-            response_model=response_model,
-            messages=[
+        t0 = time.perf_counter()
+        kwargs: dict[str, Any] = {
+            "model": chosen_model,
+            "response_model": response_model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            temperature=settings.llm_temperature,
-            seed=settings.llm_seed,
-            max_tokens=settings.llm_max_tokens,
-            timeout=settings.llm_timeout_s,
-            max_retries=max_retries,
-        )
-        return LLMResult(value=value, model=chosen_model, prompt_hash=ph)
+            "temperature": settings.llm_temperature,
+            "max_tokens": settings.llm_max_tokens,
+            "timeout": settings.llm_timeout_s,
+            "max_retries": max_retries,
+        }
+        if settings.llm_send_seed:
+            kwargs["seed"] = settings.llm_seed
+        try:
+            log.info(
+                "llm.extract start (provider=%s base_url=%s model=%s schema=%s timeout_s=%s)",
+                settings.llm_provider,
+                settings.llm_base_url,
+                chosen_model,
+                response_model.__name__,
+                settings.llm_timeout_s,
+            )
+            value = self._instructor.chat.completions.create(**kwargs)
+            dt = time.perf_counter() - t0
+            log.info(
+                "llm.extract ok (model=%s schema=%s prompt_hash=%s elapsed_s=%.2f)",
+                chosen_model,
+                response_model.__name__,
+                ph[:12],
+                dt,
+            )
+            return LLMResult(value=value, model=chosen_model, prompt_hash=ph)
+        except Exception as exc:
+            dt = time.perf_counter() - t0
+            exc_str = str(exc)
+            # Surface auth errors clearly instead of burying in retry XML
+            if "401" in exc_str or "Unauthorized" in exc_str or "User not found" in exc_str:
+                log.error(
+                    "LLM API KEY IS INVALID (401 Unauthorized). "
+                    "Provider: %s, Base URL: %s. "
+                    "Please update PRAMAAN_LLM_API_KEY in your .env file with a valid key.",
+                    settings.llm_provider,
+                    settings.llm_base_url,
+                )
+                raise RuntimeError(
+                    f"LLM API key is invalid or expired (401 Unauthorized from {settings.llm_provider}). "
+                    f"Please get a new API key from your provider and update PRAMAAN_LLM_API_KEY in .env, "
+                    f"then restart the backend."
+                ) from exc
+            log.exception(
+                "llm.extract failed (provider=%s base_url=%s model=%s schema=%s elapsed_s=%.2f prompt_hash=%s)",
+                settings.llm_provider,
+                settings.llm_base_url,
+                chosen_model,
+                response_model.__name__,
+                dt,
+                ph[:12],
+            )
+            raise
 
     def chat(
         self,
@@ -162,17 +224,19 @@ class LLMClient:
             )
 
         assert self._client is not None
-        rsp = self._client.chat.completions.create(
-            model=chosen_model,
-            messages=[
+        kwargs: dict[str, Any] = {
+            "model": chosen_model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            temperature=settings.llm_temperature,
-            seed=settings.llm_seed,
-            max_tokens=settings.llm_max_tokens,
-            timeout=settings.llm_timeout_s,
-        )
+            "temperature": settings.llm_temperature,
+            "max_tokens": settings.llm_max_tokens,
+            "timeout": settings.llm_timeout_s,
+        }
+        if settings.llm_send_seed:
+            kwargs["seed"] = settings.llm_seed
+        rsp = self._client.chat.completions.create(**kwargs)
         text = rsp.choices[0].message.content or ""
         return LLMResult(
             value=_StringWrap(text=text),
@@ -216,18 +280,20 @@ class LLMClient:
             content.append(
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
             )
-        value = self._instructor.chat.completions.create(
-            model=chosen_model,
-            response_model=response_model,
-            messages=[
+        kwargs: dict[str, Any] = {
+            "model": chosen_model,
+            "response_model": response_model,
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ],
-            temperature=settings.llm_temperature,
-            seed=settings.llm_seed,
-            max_tokens=settings.llm_max_tokens,
-            timeout=settings.llm_timeout_s,
-        )
+            "temperature": settings.llm_temperature,
+            "max_tokens": settings.llm_max_tokens,
+            "timeout": settings.llm_timeout_s,
+        }
+        if settings.llm_send_seed:
+            kwargs["seed"] = settings.llm_seed
+        value = self._instructor.chat.completions.create(**kwargs)
         return LLMResult(value=value, model=chosen_model, prompt_hash=ph)
 
 
@@ -236,5 +302,7 @@ class _StringWrap(BaseModel):
 
 
 @lru_cache(maxsize=1)
-def get_llm_client() -> LLMClient:
-    return LLMClient()
+def get_llm_client() -> Any:
+    # Use GeminiClient by default as per Phase 4 requirements
+    from pramaan.llm.gemini_client import GeminiClient
+    return GeminiClient()

@@ -25,6 +25,7 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
+    File,
     HTTPException,
     Response,
     UploadFile,
@@ -194,16 +195,16 @@ def get_bidder(bidder_id: uuid.UUID, db: Session = Depends(get_db)) -> BidderSum
     status_code=status.HTTP_201_CREATED,
     response_model=DocumentSummary,
 )
-def upload_document(
+async def upload_document(
     bidder_id: uuid.UUID,
-    file: UploadFile,
+    file: UploadFile = File(...),
     db: Session = Depends(get_db),
     me: CurrentOfficer = Depends(get_current_officer),
 ) -> DocumentSummary:
     bidder = db.get(Bidder, bidder_id) or _404("bidder", bidder_id)
     if file.filename is None:
         raise HTTPException(status_code=400, detail="missing file")
-    data = file.file.read()
+    data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="empty file")
 

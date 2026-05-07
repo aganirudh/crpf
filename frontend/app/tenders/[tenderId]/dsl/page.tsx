@@ -10,6 +10,7 @@ import {
   RefreshCcw,
   ShieldCheck,
 } from "lucide-react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
@@ -131,6 +132,9 @@ export default function DslReviewPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/tenders/${tenderId}/bidders`}>Bidder intake</Link>
+          </Button>
           <Button variant="outline" asChild>
             <a href={api.tenderSourceUrl(tenderId)} target="_blank" rel="noopener noreferrer">
               <ExternalLink className="h-4 w-4" />

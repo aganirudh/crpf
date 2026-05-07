@@ -8,6 +8,7 @@
   * Integrity    — cross-bidder analytics (W6)
 """
 
+from pramaan.agents.adjudicator import Adjudicator, AdjudicatorVerdict
 from pramaan.agents.cartographer import Cartographer, CartographerOutput
 from pramaan.agents.evidence_graph import (
     EvidenceGraphView,
@@ -20,7 +21,11 @@ from pramaan.agents.excavator import (
     Excavator,
 )
 
+from pramaan.agents.skeptic import Skeptic, SkepticResponse
+
 __all__ = [
+    "Adjudicator",
+    "AdjudicatorVerdict",
     "Cartographer",
     "CartographerOutput",
     "EvidenceGraphView",
@@ -28,5 +33,7 @@ __all__ = [
     "ExcavateDocumentResult",
     "Excavator",
     "FieldAggregate",
+    "Skeptic",
+    "SkepticResponse",
     "build_evidence_graph",
 ]

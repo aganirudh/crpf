@@ -15,9 +15,10 @@ import uuid
 from typing import Any
 
 import pypdf
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from openai import OpenAIError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -71,17 +72,17 @@ class CartographResponse(BaseModel):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=TenderSummary)
-def upload_tender(
-    file: UploadFile,
+async def upload_tender(
     background: BackgroundTasks,
-    reference_no: str | None = None,
-    department: str | None = None,
+    file: UploadFile = File(...),
+    reference_no: str | None = Form(None),
+    department: str | None = Form(None),
     db: Session = Depends(get_db),
     me: CurrentOfficer = Depends(get_current_officer),
 ) -> TenderSummary:
-    if file.filename is None or file.size is None:
+    if file.filename is None:
         raise HTTPException(status_code=400, detail="missing file")
-    data = file.file.read()
+    data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="empty file")
 
@@ -141,7 +142,64 @@ def cartograph(
 ) -> CartographResponse:
     tender = db.get(Tender, tender_id) or _404(tender_id)
     cart = Cartographer(db)
-    out = cart.run(tender, actor=me.external_id)
+    try:
+        out = cart.run(tender, actor=me.external_id)
+    except ValidationError as e:
+        log.warning("cartographer structured output failed DSL validation: %s", e)
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "cartographer_invalid_dsl",
+                "message": (
+                    "The model returned data that does not match CriterionDSL. "
+                    "Try another extractor model, enable mock mode for demos, or re-run cartograph."
+                ),
+                "validation_errors": e.errors(),
+            },
+        )
+    except OpenAIError as e:
+        log.warning("cartographer LLM request failed: %s", e)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "llm_provider",
+                "message": str(e),
+            },
+        )
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "401" in error_msg or "API key" in error_msg:
+            log.error("LLM API key invalid: %s", error_msg)
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": "llm_api_key_invalid",
+                    "message": error_msg,
+                },
+            )
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "cartographer_runtime_error", "message": error_msg},
+        )
+    except Exception as e:
+        log.exception("cartographer failed with generic error: %s", e)
+        error_msg = str(e)
+        if "RetryError" in error_msg or "ValidationError" in error_msg:
+             raise HTTPException(
+                 status_code=422,
+                 detail={
+                     "error": "llm_structured_output_failure",
+                     "message": "The LLM failed to return valid JSON matching the CriterionDSL schema.",
+                     "details": error_msg,
+                 }
+             )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "cartographer_internal_error",
+                "message": error_msg,
+            }
+        )
     return CartographResponse(
         tender_id=tender_id,
         n_criteria=len(out.dsl.criteria),

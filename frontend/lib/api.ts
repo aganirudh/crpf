@@ -30,7 +30,21 @@ async function request<T>(
   });
   if (!rsp.ok) {
     const text = await rsp.text();
-    throw new ApiError(rsp.status, text || rsp.statusText);
+    let message = text || rsp.statusText;
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      const d = parsed.detail;
+      if (typeof d === "string") {
+        message = d;
+      } else if (d && typeof d === "object" && "message" in d && typeof (d as { message: unknown }).message === "string") {
+        message = (d as { message: string }).message;
+      } else if (d !== undefined) {
+        message = typeof d === "object" ? JSON.stringify(d) : String(d);
+      }
+    } catch {
+      /* keep raw text */
+    }
+    throw new ApiError(rsp.status, message);
   }
   if (rsp.status === 204) return undefined as T;
   return (await rsp.json()) as T;

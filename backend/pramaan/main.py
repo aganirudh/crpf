@@ -17,7 +17,7 @@ from pramaan import __version__
 from pramaan.config import settings
 from pramaan.db.base import Base
 from pramaan.db.session import engine
-from pramaan.routers import bidders, health, tenders
+from pramaan.routers import bidders, health, tenders, auth
 
 logging.basicConfig(level=settings.log_level)
 log = logging.getLogger("pramaan")
@@ -58,8 +58,9 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
-app.include_router(tenders.router)
-app.include_router(bidders.router)
+app.include_router(tenders.router, prefix="/api/v1")
+app.include_router(bidders.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
 
 
 @app.get("/")
