@@ -5,7 +5,7 @@
  * server (see next.config.mjs). In prod they hit the same origin.
  */
 
-const BASE = "/api";
+const BASE = "/api/v1";
 
 async function request<T>(
   method: string,

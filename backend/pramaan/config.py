@@ -56,25 +56,22 @@ class Settings(BaseSettings):
     # ─── OPA ──────────────────────────────────────────────────────────────
     opa_url: str = "http://localhost:8181"
 
-    # ─── LLM ──────────────────────────────────────────────────────────────
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash-preview-image-generation"
-    
-    llm_provider: str = "openrouter"
-    llm_base_url: str = "https://openrouter.ai/api/v1"
+    # ─── LLM (OpenAI-compatible: Groq, OpenRouter, OpenAI, Ollama, …) ─────
+    llm_provider: str = "groq"
+    llm_base_url: str = "https://api.groq.com/openai/v1"
     llm_api_key: str = ""
-    llm_extractor_model: str = "meta-llama/llama-3.1-70b-instruct"
-    llm_skeptic_model: str = "qwen/qwen-2.5-72b-instruct"
-    llm_vlm_model: str = "qwen/qwen-2.5-vl-72b-instruct"
+    llm_extractor_model: str = "llama-3.1-70b-versatile"
+    llm_skeptic_model: str = "llama-3.1-70b-versatile"
+    llm_vlm_model: str = "llama-3.1-70b-versatile"
     llm_temperature: float = 0.0
     llm_seed: int = 42
     llm_max_tokens: int = 4096
-    llm_timeout_s: int = 120
+    llm_timeout_s: int = 60
     llm_mock: bool = False
     """If True, never calls an upstream LLM (uses deterministic stubs)."""
 
-    llm_send_seed: bool = True
-    """Some OpenAI-compatible gateways reject `seed`; disable if you see 400s."""
+    llm_send_seed: bool = False
+    """Groq and several gateways ignore or reject `seed`; set False unless your provider supports it."""
 
     openrouter_http_referer: str = ""
     """Optional `HTTP-Referer` for OpenRouter (`HTTP-Referer` analytics header); defaults to `frontend_origin`."""
@@ -104,7 +101,9 @@ class Settings(BaseSettings):
         """True when mock forced, key missing, or key still looks like a template."""
         if self.llm_mock:
             return True
+
         key = self.llm_api_key.strip()
+
         if not key:
             return True
         # `.env.example` ships `sk-or-v1-REPLACE_ME` — non-empty but unusable; don't hammer the provider with 401s.
@@ -121,6 +120,7 @@ class Settings(BaseSettings):
         if any(p in k for p in placeholders):
             return True
         return False
+
 
 
 @lru_cache(maxsize=1)

@@ -130,7 +130,7 @@ class FieldValue(BaseModel):
     OCR blocks to obtain the bbox.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     field: str
     value: int | float | str | bool | None
@@ -153,7 +153,7 @@ class DocumentExtraction(BaseModel):
     `EvidenceNode`.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     document_kind: str
     """E.g. 'audited_financial_statement', 'gst_registration_certificate'.

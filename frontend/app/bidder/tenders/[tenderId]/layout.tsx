@@ -12,7 +12,8 @@ import {
   Award,
   Upload,
   BarChart3,
-  Sparkles
+  Sparkles,
+  FileText
 } from "lucide-react";
 
 const TENDER_META = {
@@ -40,6 +41,7 @@ export default function BidderTenderLayout({ children }: { children: React.React
   const basePath = `/bidder/tenders/${params.tenderId}`;
   
   const tabs = [
+    { id: "view", label: "Original Tender", path: `${basePath}/view`, icon: FileText },
     { id: "criteria", label: "Tender Criteria", path: basePath, icon: ClipboardCheck },
     { id: "submit", label: "Document Submission", path: `${basePath}/submit`, icon: Upload },
     { id: "status", label: "Evaluation Status", path: `${basePath}/status`, icon: BarChart3 },

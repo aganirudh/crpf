@@ -25,10 +25,11 @@ def main() -> int:
     with engine.begin() as conn:
         Base.metadata.drop_all(conn)
         conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+        print("recreating tables from models...")
+        Base.metadata.create_all(conn)
 
-    print("running alembic upgrade head...")
-    rc = subprocess.call([sys.executable, "-m", "alembic", "upgrade", "head"])
-    return rc
+    print("DB reset complete.")
+    return 0
 
 
 if __name__ == "__main__":

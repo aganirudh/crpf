@@ -108,6 +108,7 @@ class Bidder(Base, UUIDPKMixin, TimestampMixin):
     gstin: Mapped[str | None] = mapped_column(String(32))
     pan: Mapped[str | None] = mapped_column(String(16))
     bid_price_inr: Mapped[int | None] = mapped_column(BigInteger)
+    selection_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")  # pending, accepted, rejected
 
     tender: Mapped[Tender] = relationship(back_populates="bidders")
     documents: Mapped[list["Document"]] = relationship(

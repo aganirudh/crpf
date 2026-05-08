@@ -71,7 +71,12 @@ class BidderSummary(BaseModel):
     gstin: str | None
     pan: str | None
     bid_price_inr: int | None
+    selection_status: str
     n_documents: int
+
+
+class BidderStatusIn(BaseModel):
+    status: str  # pending, accepted, rejected
 
 
 class DocumentSummary(BaseModel):
@@ -157,7 +162,6 @@ def create_bidder(
     tender_id: uuid.UUID,
     payload: BidderIn,
     db: Session = Depends(get_db),
-    me: CurrentOfficer = Depends(get_current_officer),
 ) -> BidderSummary:
     tender = db.get(Tender, tender_id) or _404("tender", tender_id)
     bidder = Bidder(tender_id=tender.id, **payload.model_dump())
@@ -165,7 +169,7 @@ def create_bidder(
     db.flush()
     get_ledger(db).append(
         kind="bidder.created",
-        actor=me.external_id,
+        actor="anonymous-bidder",
         tender_id=tender.id,
         bidder_id=bidder.id,
         payload={"bidder_id": str(bidder.id), **payload.model_dump()},
@@ -197,9 +201,9 @@ def get_bidder(bidder_id: uuid.UUID, db: Session = Depends(get_db)) -> BidderSum
 )
 async def upload_document(
     bidder_id: uuid.UUID,
+    background: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    me: CurrentOfficer = Depends(get_current_officer),
 ) -> DocumentSummary:
     bidder = db.get(Bidder, bidder_id) or _404("bidder", bidder_id)
     if file.filename is None:
@@ -221,36 +225,65 @@ async def upload_document(
     existing = db.execute(
         select(Document).where(Document.bidder_id == bidder.id, Document.sha256 == sha)
     ).scalar_one_or_none()
+    
     if existing is not None:
-        return _doc_summary(existing)
+        doc = existing
+    else:
+        doc = Document(
+            bidder_id=bidder.id,
+            filename=file.filename,
+            mime=file.content_type or "application/octet-stream",
+            sha256=sha,
+            storage_uri=storage_uri,
+            page_count=page_count,
+            classification=cls.value,
+        )
+        db.add(doc)
+        db.flush()
+        get_ledger(db).append(
+            kind="bidder.document.uploaded",
+            actor="anonymous-bidder",
+            tender_id=bidder.tender_id,
+            bidder_id=bidder.id,
+            payload={
+                "document_id": str(doc.id),
+                "filename": file.filename,
+                "sha256": sha.hex(),
+                "page_count": page_count,
+                "classification": cls.value,
+            },
+        )
+        db.commit()
+        db.refresh(doc)
 
-    doc = Document(
-        bidder_id=bidder.id,
-        filename=file.filename,
-        mime=file.content_type or "application/octet-stream",
-        sha256=sha,
-        storage_uri=storage_uri,
-        page_count=page_count,
-        classification=cls.value,
+    # Trigger Excavator automatically
+    background.add_task(
+        _run_excavator_async, bidder_id=bidder.id, actor="anonymous-bidder"
     )
-    db.add(doc)
-    db.flush()
+
+    return _doc_summary(doc)
+
+
+@router.post("/bidders/{bidder_id}/status", response_model=BidderSummary)
+def update_bidder_status(
+    bidder_id: uuid.UUID,
+    payload: BidderStatusIn,
+    db: Session = Depends(get_db),
+    me: CurrentOfficer = Depends(get_current_officer),
+) -> BidderSummary:
+    bidder = db.get(Bidder, bidder_id) or _404("bidder", bidder_id)
+    bidder.selection_status = payload.status
+    
     get_ledger(db).append(
-        kind="bidder.document.uploaded",
+        kind="bidder.status_updated",
         actor=me.external_id,
         tender_id=bidder.tender_id,
         bidder_id=bidder.id,
-        payload={
-            "document_id": str(doc.id),
-            "filename": file.filename,
-            "sha256": sha.hex(),
-            "page_count": page_count,
-            "classification": cls.value,
-        },
+        payload={"new_status": payload.status},
     )
     db.commit()
-    db.refresh(doc)
-    return _doc_summary(doc)
+    db.refresh(bidder)
+    return _bidder_summary(bidder, n_docs=len(bidder.documents))
 
 
 @router.get("/bidders/{bidder_id}/documents", response_model=list[DocumentSummary])
@@ -408,6 +441,7 @@ def _bidder_summary(b: Bidder, *, n_docs: int) -> BidderSummary:
         gstin=b.gstin,
         pan=b.pan,
         bid_price_inr=b.bid_price_inr,
+        selection_status=b.selection_status,
         n_documents=n_docs,
     )
 

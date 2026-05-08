@@ -20,7 +20,9 @@ import {
   Loader2,
   Copy,
   Check,
+  Gavel,
 } from "lucide-react";
+import { PdfViewer } from "@/components/pdf-viewer";
 
 // ─── The evaluation payload JSON (transparent reasoning) ─────────────
 const EVALUATION_PAYLOAD = {
@@ -192,10 +194,38 @@ export default function AdminBidderDetailPage() {
   const router = useRouter();
   const params = useParams();
   const [activeView, setActiveView] = React.useState<ViewTab>("verdicts");
-  const [jsonExpanded, setJsonExpanded] = React.useState(false);
+  const [isJudging, setIsJudging] = React.useState(false);
+  const [docToView, setDocToView] = React.useState<"tender" | "bidder">("tender");
   const [summaryLoading, setSummaryLoading] = React.useState(false);
   const [summaryGenerated, setSummaryGenerated] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
+  const [jsonExpanded, setJsonExpanded] = React.useState(false);
+  const [updatingStatus, setUpdatingStatus] = React.useState(false);
+
+  const tenderId = params.tenderId as string;
+  const bidderId = params.bidderId as string;
+
+  const handleUpdateStatus = async (newStatus: "accepted" | "rejected") => {
+    setUpdatingStatus(true);
+    try {
+      const resp = await fetch(`/api/v1/bidders/${bidderId}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!resp.ok) throw new Error("Failed to update status");
+      router.refresh();
+      // In a real app we'd use a toast here
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const tenderPdfUrl = `/api/v1/tenders/${tenderId}/source`;
+  // Assuming a similar endpoint for bidder documents, or just reuse tender for now
+  const bidderPdfUrl = `/api/v1/tenders/${tenderId}/source`; 
 
   const handleGenerateSummary = () => {
     setSummaryLoading(true);
@@ -216,7 +246,7 @@ export default function AdminBidderDetailPage() {
   const totalCount = VERDICT_DETAILS.length;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className={`p-6 max-w-7xl mx-auto space-y-6 ${isJudging ? "max-w-none" : ""}`}>
       {/* Header */}
       <div className="animate-fade-in-up">
         <button
@@ -232,152 +262,223 @@ export default function AdminBidderDetailPage() {
               Tender: CRPF/GC-BLR/ENGG/2025-26/CT-07
             </p>
           </div>
-          <div className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
-            <span className="status-dot pass" />
-            Eligible
-          </div>
-        </div>
-      </div>
-
-      {/* Score overview */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 animate-fade-in-up stagger-1">
-        <div className="rounded-lg border border-border/30 bg-card/40 p-4 text-center">
-          <p className="text-3xl font-bold text-emerald-400">{passCount}/{totalCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">Criteria Passed</p>
-        </div>
-        <div className="rounded-lg border border-border/30 bg-card/40 p-4 text-center">
-          <p className="text-3xl font-bold">94%</p>
-          <p className="text-xs text-muted-foreground mt-1">Avg Confidence</p>
-        </div>
-        <div className="rounded-lg border border-border/30 bg-card/40 p-4 text-center">
-          <p className="text-3xl font-bold text-amber-400">13/25</p>
-          <p className="text-xs text-muted-foreground mt-1">Optional Score</p>
-        </div>
-        <div className="rounded-lg border border-border/30 bg-card/40 p-4 text-center">
-          <p className="text-3xl font-bold text-primary">14</p>
-          <p className="text-xs text-muted-foreground mt-1">Documents</p>
-        </div>
-      </div>
-
-      {/* View Tabs */}
-      <div className="border-b border-border/30 animate-fade-in-up stagger-2">
-        <div className="flex items-center gap-1">
-          {([
-            { id: "verdicts" as ViewTab, label: "Verdict Details", icon: CheckCircle2 },
-            { id: "payload" as ViewTab, label: "Evaluation Payload (JSON)", icon: Code2 },
-            { id: "summary" as ViewTab, label: "AI Summary", icon: Brain },
-          ]).map(({ id, label, icon: Icon }) => (
+          <div className="flex items-center gap-3">
             <button
-              key={id}
-              onClick={() => setActiveView(id)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
-                activeView === id
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+              onClick={() => handleUpdateStatus("accepted")}
+              disabled={updatingStatus}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Accept Bid
+            </button>
+            <button
+              onClick={() => handleUpdateStatus("rejected")}
+              disabled={updatingStatus}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
+            >
+              <XCircle className="h-4 w-4" />
+              Reject Bid
+            </button>
+            <div className="w-px h-8 bg-border/50 mx-1" />
+            <button
+              onClick={() => setIsJudging(!isJudging)}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border transition-all text-sm font-semibold ${
+                isJudging 
+                  ? "bg-primary text-primary-foreground border-primary shadow-lg shadow-primary/20" 
+                  : "bg-secondary/50 text-foreground border-border hover:bg-secondary"
               }`}
             >
-              <Icon className="h-4 w-4" />
-              {label}
+              <Gavel className={`h-4 w-4 ${isJudging ? "animate-bounce" : ""}`} />
+              {isJudging ? "Exit Judging" : "Judge with PDF"}
             </button>
-          ))}
+            <div className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
+              <span className="status-dot pass" />
+              Eligible
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Verdicts Tab */}
-      {activeView === "verdicts" && (
-        <div className="space-y-2 animate-fade-in">
-          {VERDICT_DETAILS.map((v) => (
-            <div key={v.id} className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border/30 bg-card/40 hover:bg-secondary/20 transition-colors">
-              <div className="shrink-0">
-                {v.status === "pass" && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}
-                {v.status === "fail" && <XCircle className="h-4 w-4 text-red-400" />}
-                {v.status === "review" && <AlertTriangle className="h-4 w-4 text-amber-400" />}
-              </div>
-              <span className="text-xs font-mono font-bold text-primary w-10">{v.id}</span>
-              <span className="text-sm flex-1">{v.label}</span>
-              <div className="flex items-center gap-3">
-                <div className="w-24 h-1.5 rounded-full bg-secondary overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-1000 ${
-                      v.confidence >= 90 ? "bg-emerald-400" : v.confidence >= 75 ? "bg-amber-400" : "bg-red-400"
-                    }`}
-                    style={{ width: `${v.confidence}%` }}
-                  />
-                </div>
-                <span className="text-xs font-mono text-muted-foreground w-10 text-right">{v.confidence}%</span>
-              </div>
-            </div>
-          ))}
-          {/* Generate Summary Button */}
-          {!summaryGenerated && (
-            <div className="pt-4">
+      <div className={`grid gap-6 ${isJudging ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"}`}>
+        {/* Left Side: PDF Viewer (only in Judging mode) */}
+        {isJudging && (
+          <div className="space-y-4 h-[calc(100vh-250px)] sticky top-6">
+            <div className="flex items-center gap-2 p-1 rounded-lg bg-secondary/50 border border-border/50 w-fit">
               <button
-                onClick={handleGenerateSummary}
-                disabled={summaryLoading}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-primary to-blue-600 text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
+                onClick={() => setDocToView("tender")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                  docToView === "tender" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
               >
-                {summaryLoading ? (
-                  <><Loader2 className="h-4 w-4 animate-spin" /> Generating Analysis…</>
-                ) : (
-                  <><Brain className="h-4 w-4" /> Generate Pramaan Analysis</>
-                )}
+                Tender PDF
+              </button>
+              <button
+                onClick={() => setDocToView("bidder")}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
+                  docToView === "bidder" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Bidder Documents
               </button>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Payload Tab (JSON) */}
-      {activeView === "payload" && (
-        <div className="animate-fade-in space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              This is the exact structured data computed by the Pramaan Reasoning Engine before summary generation.
-            </p>
-            <button
-              onClick={handleCopyJson}
-              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? "Copied!" : "Copy JSON"}
-            </button>
+            <PdfViewer 
+              url={docToView === "tender" ? tenderPdfUrl : bidderPdfUrl} 
+              title={docToView === "tender" ? "Tender: CRPF/GC-BLR/ENGG/2025-26/CT-07" : "Bidder: Rajesh Kumar & Associates (Full Bundle)"}
+              className="h-full"
+            />
           </div>
-          <div className="json-viewer max-h-[600px] overflow-y-auto">
-            <pre className="whitespace-pre-wrap">
-              <JsonHighlight data={EVALUATION_PAYLOAD} />
-            </pre>
-          </div>
-        </div>
-      )}
+        )}
 
-      {/* Summary Tab */}
-      {activeView === "summary" && (
-        <div className="animate-fade-in">
-          {summaryGenerated ? (
-            <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-6 space-y-4">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground pb-3 border-b border-border/30">
-                <Brain className="h-3.5 w-3.5 text-primary" />
-                <span>Generated by Pramaan Analysis Engine · {new Date().toLocaleDateString()}</span>
+        {/* Right Side: Evaluation Details */}
+        <div className="space-y-6 overflow-y-auto max-h-full">
+          {!isJudging && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 animate-fade-in-up stagger-1">
+              <div className="rounded-lg border border-border/30 bg-card/40 p-4 text-center">
+                <p className="text-3xl font-bold text-emerald-400">{passCount}/{totalCount}</p>
+                <p className="text-xs text-muted-foreground mt-1">Criteria Passed</p>
               </div>
-              <div className="prose prose-sm prose-invert max-w-none">
-                {AI_SUMMARY.split("\n").map((line, i) => {
-                  if (line.startsWith("## ")) return <h2 key={i} className="text-lg font-bold mt-4 mb-2">{line.replace("## ", "")}</h2>;
-                  if (line.startsWith("### ")) return <h3 key={i} className="text-sm font-bold mt-3 mb-1 text-primary">{line.replace("### ", "")}</h3>;
-                  if (line.startsWith("- ")) return <li key={i} className="text-sm text-foreground/90 ml-4">{renderBold(line.replace("- ", ""))}</li>;
-                  if (line.trim() === "") return <div key={i} className="h-2" />;
-                  return <p key={i} className="text-sm text-foreground/90 leading-relaxed">{renderBold(line)}</p>;
-                })}
+              <div className="rounded-lg border border-border/30 bg-card/40 p-4 text-center">
+                <p className="text-3xl font-bold">94%</p>
+                <p className="text-xs text-muted-foreground mt-1">Avg Confidence</p>
+              </div>
+              <div className="rounded-lg border border-border/30 bg-card/40 p-4 text-center">
+                <p className="text-3xl font-bold text-amber-400">13/25</p>
+                <p className="text-xs text-muted-foreground mt-1">Optional Score</p>
+              </div>
+              <div className="rounded-lg border border-border/30 bg-card/40 p-4 text-center">
+                <p className="text-3xl font-bold text-primary">14</p>
+                <p className="text-xs text-muted-foreground mt-1">Documents</p>
               </div>
             </div>
-          ) : (
-            <div className="text-center py-16 text-muted-foreground">
-              <Brain className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-              <p className="text-sm font-medium">Summary not yet generated</p>
-              <p className="text-xs mt-1">Go to Verdict Details tab and click &quot;Generate Pramaan Analysis&quot;</p>
+          )}
+
+          {/* View Tabs */}
+          <div className="border-b border-border/30">
+            <div className="flex items-center gap-1">
+              {([
+                { id: "verdicts" as ViewTab, label: "Verdict Details", icon: CheckCircle2 },
+                { id: "payload" as ViewTab, label: "Evaluation Payload", icon: Code2 },
+                { id: "summary" as ViewTab, label: "AI Summary", icon: Brain },
+              ]).map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setActiveView(id)}
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-all ${
+                    activeView === id
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Verdicts Tab */}
+          {activeView === "verdicts" && (
+            <div className="space-y-2">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 mb-4">
+                <h3 className="text-sm font-semibold text-emerald-500 mb-1">Judging Instructions</h3>
+                <p className="text-xs text-muted-foreground">
+                  Verify the AI-extracted values against the PDF on the left. Click on a criterion to see the specific source pages and quotes used for the verdict.
+                </p>
+              </div>
+              {VERDICT_DETAILS.map((v) => (
+                <div key={v.id} className="flex items-center gap-3 px-4 py-3 rounded-lg border border-border/30 bg-card/40 hover:bg-secondary/20 transition-colors cursor-pointer group">
+                  <div className="shrink-0">
+                    {v.status === "pass" && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+                    {v.status === "fail" && <XCircle className="h-4 w-4 text-red-400" />}
+                    {v.status === "review" && <AlertTriangle className="h-4 w-4 text-amber-400" />}
+                  </div>
+                  <span className="text-xs font-mono font-bold text-primary w-10">{v.id}</span>
+                  <span className="text-sm flex-1">{v.label}</span>
+                  <div className="flex items-center gap-3">
+                    <div className="w-24 h-1.5 rounded-full bg-secondary overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-1000 ${
+                          v.confidence >= 90 ? "bg-emerald-400" : v.confidence >= 75 ? "bg-amber-400" : "bg-red-400"
+                        }`}
+                        style={{ width: `${v.confidence}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-mono text-muted-foreground w-10 text-right">{v.confidence}%</span>
+                  </div>
+                </div>
+              ))}
+              {/* Generate Summary Button */}
+              {!summaryGenerated && (
+                <div className="pt-4">
+                  <button
+                    onClick={handleGenerateSummary}
+                    disabled={summaryLoading}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-gradient-to-r from-primary to-blue-600 text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
+                  >
+                    {summaryLoading ? (
+                      <><Loader2 className="h-4 w-4 animate-spin" /> Generating Analysis…</>
+                    ) : (
+                      <><Brain className="h-4 w-4" /> Generate Pramaan Analysis</>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Payload Tab (JSON) */}
+          {activeView === "payload" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Exact structured data computed by the Pramaan Reasoning Engine.
+                </p>
+                <button
+                  onClick={handleCopyJson}
+                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? "Copied!" : "Copy JSON"}
+                </button>
+              </div>
+              <div className="json-viewer max-h-[600px] overflow-y-auto">
+                <pre className="whitespace-pre-wrap">
+                  <JsonHighlight data={EVALUATION_PAYLOAD} />
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {/* Summary Tab */}
+          {activeView === "summary" && (
+            <div>
+              {summaryGenerated ? (
+                <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-6 space-y-4">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground pb-3 border-b border-border/30">
+                    <Brain className="h-3.5 w-3.5 text-primary" />
+                    <span>Generated by Pramaan Analysis Engine · {new Date().toLocaleDateString()}</span>
+                  </div>
+                  <div className="prose prose-sm prose-invert max-w-none">
+                    {AI_SUMMARY.split("\n").map((line, i) => {
+                      if (line.startsWith("## ")) return <h2 key={i} className="text-lg font-bold mt-4 mb-2">{line.replace("## ", "")}</h2>;
+                      if (line.startsWith("### ")) return <h3 key={i} className="text-sm font-bold mt-3 mb-1 text-primary">{line.replace("### ", "")}</h3>;
+                      if (line.startsWith("- ")) return <li key={i} className="text-sm text-foreground/90 ml-4">{renderBold(line.replace("- ", ""))}</li>;
+                      if (line.trim() === "") return <div key={i} className="h-2" />;
+                      return <p key={i} className="text-sm text-foreground/90 leading-relaxed">{renderBold(line)}</p>;
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-16 text-muted-foreground">
+                  <Brain className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
+                  <p className="text-sm font-medium">Summary not yet generated</p>
+                  <p className="text-xs mt-1">Go to Verdict Details tab and click &quot;Generate Pramaan Analysis&quot;</p>
+                </div>
+              )}
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -27,15 +27,18 @@ def readyz(db: Session = Depends(get_db)) -> dict[str, str]:
 @router.get("/info")
 def info() -> dict[str, object]:
     key = (settings.llm_api_key or "").strip()
+    model = settings.llm_extractor_model
+
     return {
         "name": "PRAMAAN",
         "version": __version__,
         "env": settings.env,
         "llm_provider": settings.llm_provider,
-        "llm_extractor_model": settings.llm_extractor_model,
+        "llm_extractor_model": model,
         "mock_llm": settings.is_mock_llm,
         "llm_mock_flag": settings.llm_mock,
         "llm_api_key_set": bool(key),
         "llm_api_key_prefix": (key[:6] + "…" if key else None),
         "auth_mode": settings.auth_mode,
     }
+

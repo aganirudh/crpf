@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useParams } from "next/navigation";
 import {
   CheckCircle2,
   XCircle,
@@ -10,7 +11,9 @@ import {
   ShieldCheck,
   ChevronDown,
   ChevronRight,
-  Info
+  Loader2,
+  Trophy,
+  Ban
 } from "lucide-react";
 
 // Same verdicts as admin, but read-only for bidder
@@ -47,8 +50,39 @@ Statutory registrations (GST, PF, ESI, PAN) are verified and active. **Criteria 
 No further action is required from you at this time. You will be notified once the manual review is complete and the final verdict is published.`;
 
 export default function BidderTenderStatusPage() {
+  const params = useParams();
   const [summaryExpanded, setSummaryExpanded] = React.useState(true);
+  const [bidder, setBidder] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(true);
 
+  React.useEffect(() => {
+    const fetchMyBid = async () => {
+      try {
+        const resp = await fetch(`/api/v1/tenders/${params.tenderId}/bidders`);
+        const data = await resp.json();
+        if (data && data.length > 0) {
+          // Find the most recently created bidder or just use the first one
+          setBidder(data[data.length - 1]);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchMyBid();
+  }, [params.tenderId]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider">Syncing with Ledger...</p>
+      </div>
+    );
+  }
+
+  const selectionStatus = bidder?.selection_status || "pending";
   const passCount = VERDICT_DETAILS.filter(v => v.status === "pass").length;
   const reviewCount = VERDICT_DETAILS.filter(v => v.status === "review").length;
   const failCount = VERDICT_DETAILS.filter(v => v.status === "fail").length;
@@ -56,20 +90,62 @@ export default function BidderTenderStatusPage() {
 
   return (
     <div className="space-y-6">
+      {/* Selection Status Banner */}
+      {selectionStatus === "accepted" && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6 flex items-center gap-6 animate-fade-in shadow-[0_0_30px_rgba(16,185,129,0.1)]">
+          <div className="h-16 w-16 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+            <Trophy className="h-8 w-8 text-white animate-bounce" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-emerald-400">Congratulations!</h2>
+            <p className="text-foreground/80 mt-1">
+              Your bid for <span className="font-semibold">{bidder.legal_name}</span> has been <strong>ACCEPTED</strong>. 
+              The department will contact you soon for the work order.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {selectionStatus === "rejected" && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 flex items-center gap-6 animate-fade-in">
+          <div className="h-16 w-16 rounded-full bg-red-500 flex items-center justify-center">
+            <Ban className="h-8 w-8 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-red-400">Bid Rejected</h2>
+            <p className="text-foreground/80 mt-1">
+              We regret to inform you that your bid for <span className="font-semibold">{bidder.legal_name}</span> has been <strong>REJECTED</strong>.
+              You can review the evaluation breakdown below for details.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-xl border border-border/50 bg-card/60 backdrop-blur-sm p-5">
           <div className="flex justify-between items-start">
             <div>
               <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Overall Status</p>
-              <h3 className="text-2xl font-bold text-amber-400 mt-1">Evaluating</h3>
+              <h3 className={`text-2xl font-bold mt-1 ${
+                selectionStatus === "accepted" ? "text-emerald-400" : 
+                selectionStatus === "rejected" ? "text-red-400" : "text-amber-400"
+              }`}>
+                {selectionStatus === "accepted" ? "Accepted" : 
+                 selectionStatus === "rejected" ? "Rejected" : "Evaluating"}
+              </h3>
             </div>
-            <div className="h-10 w-10 rounded-full bg-amber-500/10 flex items-center justify-center">
-              <Clock className="h-5 w-5 text-amber-400" />
+            <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
+                selectionStatus === "accepted" ? "bg-emerald-500/10" : 
+                selectionStatus === "rejected" ? "bg-red-500/10" : "bg-amber-500/10"
+            }`}>
+              {selectionStatus === "accepted" ? <CheckCircle2 className="h-5 w-5 text-emerald-400" /> : 
+               selectionStatus === "rejected" ? <XCircle className="h-5 w-5 text-red-400" /> : 
+               <Clock className="h-5 w-5 text-amber-400" />}
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-4">
-            Awaiting manual review on {reviewCount} criteria
+            {selectionStatus === "pending" ? `Awaiting manual review on ${reviewCount} criteria` : "Final decision published"}
           </p>
         </div>
 
@@ -161,7 +237,7 @@ export default function BidderTenderStatusPage() {
             <div key={v.id} className="flex items-center gap-3 p-4 bg-card hover:bg-secondary/20 transition-colors">
               <div className="shrink-0">
                 {v.status === "pass" && <CheckCircle2 className="h-5 w-5 text-emerald-500" />}
-                {v.status === "fail" && <XCircle className="h-5 w-5 text-red-500" />}
+                {v.status === "fail" && <XCircle className="h-5 w-5 text-red-400" />}
                 {v.status === "review" && <AlertTriangle className="h-5 w-5 text-amber-500" />}
               </div>
               <div className="flex-1 min-w-0">

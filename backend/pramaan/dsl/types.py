@@ -54,7 +54,7 @@ class Window(BaseModel):
     `aggregator` controls how multiple in-window observations combine.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     last_n_fy: int | None = Field(default=None, ge=1, le=20)
     last_n_years: int | None = Field(default=None, ge=1, le=20)
@@ -65,14 +65,14 @@ class Window(BaseModel):
 class TextSource(BaseModel):
     """Where in the tender did this criterion come from?"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     page: int = Field(ge=1)
     bbox: tuple[float, float, float, float]
 
 
 class CrossCheck(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     against: str
     tolerance_pct: float = Field(default=5.0, ge=0.0, le=100.0)
@@ -84,7 +84,7 @@ class CrossCheck(BaseModel):
 class ScalarConstraint(BaseModel):
     """A single-value comparison."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     kind: Literal["scalar"] = "scalar"
     field: str
@@ -97,7 +97,7 @@ class ScalarConstraint(BaseModel):
 class SetConstraint(BaseModel):
     """An aggregate over a filtered set (e.g. "at least 3 similar projects")."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     kind: Literal["set"] = "set"
     field: str
@@ -109,7 +109,7 @@ class SetConstraint(BaseModel):
 class DocConstraint(BaseModel):
     """A 'this document must exist (and be valid)' check."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     kind: Literal["doc"] = "doc"
     field: str
@@ -129,7 +129,7 @@ Constraint = Annotated[
 class Criterion(BaseModel):
     """One eligibility criterion, fully typed and machine-evaluable."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     id: str = Field(pattern=r"^C\d+$")
     type: CriterionType
@@ -160,7 +160,7 @@ class Criterion(BaseModel):
 class EvidenceVocabularyEntry(BaseModel):
     """A canonical evidence-document name plus its tender-specific aliases."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     aliases: list[str] = Field(default_factory=list)
     expected_fields: list[str] = Field(default_factory=list)
@@ -170,7 +170,7 @@ class EvidenceVocabularyEntry(BaseModel):
 
 
 class TenderMeta(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     id: str
     source_sha256: str
@@ -185,7 +185,7 @@ class TenderMeta(BaseModel):
 class CriterionDSL(BaseModel):
     """Top-level DSL document (matches docs/03-criterion-dsl.md)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     dsl_version: Literal["v1"] = "v1"
     tender: TenderMeta

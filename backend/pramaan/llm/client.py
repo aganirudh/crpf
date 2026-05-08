@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -28,6 +29,56 @@ from pramaan.config import settings
 log = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+MAX_JSON_REPAIR_ATTEMPTS = 3
+
+
+def _strip_json_fences(raw: str) -> str:
+    """Remove common markdown code fences so `json.loads` can run."""
+    text = (raw or "").strip()
+    text = re.sub(r"^\s*```(?:json)?\s*", "", text, flags=re.IGNORECASE | re.MULTILINE)
+    text = re.sub(r"\s*```\s*$", "", text).strip()
+    return text
+
+
+def _parse_json_model(raw: str, response_model: type[T]) -> T:
+    """Parse JSON text into a validated pydantic model."""
+    text = _strip_json_fences(raw)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Single-object tenders sometimes wrap extra prose — grab outermost {...}
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            data = json.loads(text[start : end + 1])
+        else:
+            raise
+    return response_model.model_validate(data)
+
+
+def _map_llm_usage_error(exc: BaseException) -> RuntimeError | None:
+    """Map common HTTP status patterns from OpenAI-compatible clients."""
+    exc_str = str(exc)
+    if "401" in exc_str or "Unauthorized" in exc_str or "User not found" in exc_str:
+        log.error(
+            "LLM API key rejected (401 Unauthorized). Endpoint: %s",
+            settings.llm_base_url,
+        )
+        return RuntimeError(
+            "LLM API key is invalid or expired (401 Unauthorized). "
+            f"Endpoint: {settings.llm_base_url}. "
+            "Set PRAMAAN_LLM_API_KEY to a valid key for that endpoint, then restart the backend."
+        )
+    if "402" in exc_str or "Payment Required" in exc_str or "insufficient_quota" in exc_str:
+        log.error(
+            "LLM provider quota or billing issue (402). Endpoint: %s",
+            settings.llm_base_url,
+        )
+        return RuntimeError(
+            f"LLM provider quota or billing limit (402) at {settings.llm_base_url}."
+        )
+    return None
 
 
 # ─── Hashing ───────────────────────────────────────────────────────────────
@@ -116,6 +167,10 @@ class LLMClient:
 
         On mock, dispatches to `pramaan.llm.mock.fake_extract` so callers
         get a deterministic value of the right type.
+
+        Live mode: tries Instructor JSON mode first, then falls back to a
+        plain completion + JSON parse + pydantic validation with up to
+        ``MAX_JSON_REPAIR_ATTEMPTS`` self-correction turns (Groq/Llama).
         """
         chosen_model = model or settings.llm_extractor_model
         ph = prompt_hash(
@@ -133,32 +188,38 @@ class LLMClient:
             value = fake_extract(response_model, system=system, user=user)
             return LLMResult(value=value, model=f"mock://{chosen_model}", prompt_hash=ph)
 
-        assert self._instructor is not None
+        assert self._client is not None and self._instructor is not None
         t0 = time.perf_counter()
-        kwargs: dict[str, Any] = {
+
+        kwargs_base: dict[str, Any] = {
             "model": chosen_model,
-            "response_model": response_model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
             "temperature": settings.llm_temperature,
             "max_tokens": settings.llm_max_tokens,
             "timeout": settings.llm_timeout_s,
-            "max_retries": max_retries,
         }
         if settings.llm_send_seed:
-            kwargs["seed"] = settings.llm_seed
+            kwargs_base["seed"] = settings.llm_seed
+
+        log.info(
+            "llm.extract start (provider=%s base_url=%s model=%s schema=%s timeout_s=%s)",
+            settings.llm_provider,
+            settings.llm_base_url,
+            chosen_model,
+            response_model.__name__,
+            settings.llm_timeout_s,
+        )
+
         try:
-            log.info(
-                "llm.extract start (provider=%s base_url=%s model=%s schema=%s timeout_s=%s)",
-                settings.llm_provider,
-                settings.llm_base_url,
-                chosen_model,
-                response_model.__name__,
-                settings.llm_timeout_s,
-            )
-            value = self._instructor.chat.completions.create(**kwargs)
+            kwargs_inst: dict[str, Any] = {
+                **kwargs_base,
+                "response_model": response_model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "max_retries": max_retries,
+            }
+            value = self._instructor.chat.completions.create(**kwargs_inst)
             dt = time.perf_counter() - t0
             log.info(
                 "llm.extract ok (model=%s schema=%s prompt_hash=%s elapsed_s=%.2f)",
@@ -168,33 +229,76 @@ class LLMClient:
                 dt,
             )
             return LLMResult(value=value, model=chosen_model, prompt_hash=ph)
-        except Exception as exc:
-            dt = time.perf_counter() - t0
-            exc_str = str(exc)
-            # Surface auth errors clearly instead of burying in retry XML
-            if "401" in exc_str or "Unauthorized" in exc_str or "User not found" in exc_str:
-                log.error(
-                    "LLM API KEY IS INVALID (401 Unauthorized). "
-                    "Provider: %s, Base URL: %s. "
-                    "Please update PRAMAAN_LLM_API_KEY in your .env file with a valid key.",
-                    settings.llm_provider,
-                    settings.llm_base_url,
-                )
-                raise RuntimeError(
-                    f"LLM API key is invalid or expired (401 Unauthorized from {settings.llm_provider}). "
-                    f"Please get a new API key from your provider and update PRAMAAN_LLM_API_KEY in .env, "
-                    f"then restart the backend."
-                ) from exc
-            log.exception(
-                "llm.extract failed (provider=%s base_url=%s model=%s schema=%s elapsed_s=%.2f prompt_hash=%s)",
-                settings.llm_provider,
-                settings.llm_base_url,
-                chosen_model,
-                response_model.__name__,
-                dt,
-                ph[:12],
+        except Exception as inst_exc:
+            mapped = _map_llm_usage_error(inst_exc)
+            if mapped is not None:
+                raise mapped from inst_exc
+            log.warning(
+                "llm.extract instructor path failed (%s); trying JSON repair loop",
+                inst_exc,
             )
-            raise
+
+        schema_snippet = json.dumps(
+            response_model.model_json_schema(), indent=2, default=str
+        )
+        if len(schema_snippet) > 12000:
+            schema_snippet = schema_snippet[:12000] + "\n... (truncated)"
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        last_raw = ""
+        last_err: BaseException | None = None
+
+        for repair_attempt in range(MAX_JSON_REPAIR_ATTEMPTS):
+            try:
+                rsp = self._client.chat.completions.create(
+                    **kwargs_base,
+                    messages=messages,
+                )
+                last_raw = rsp.choices[0].message.content or ""
+                value = _parse_json_model(last_raw, response_model)
+                dt = time.perf_counter() - t0
+                log.info(
+                    "llm.extract ok (repair path attempt=%s model=%s schema=%s prompt_hash=%s elapsed_s=%.2f)",
+                    repair_attempt + 1,
+                    chosen_model,
+                    response_model.__name__,
+                    ph[:12],
+                    dt,
+                )
+                return LLMResult(value=value, model=chosen_model, prompt_hash=ph)
+            except Exception as exc:
+                last_err = exc
+                mapped = _map_llm_usage_error(exc)
+                if mapped is not None:
+                    raise mapped from exc
+                log.warning(
+                    "llm.extract repair attempt %s/%s failed: %s",
+                    repair_attempt + 1,
+                    MAX_JSON_REPAIR_ATTEMPTS,
+                    exc,
+                )
+                if repair_attempt >= MAX_JSON_REPAIR_ATTEMPTS - 1:
+                    log.error(
+                        "llm.extract repair exhausted; last raw (truncated): %s",
+                        last_raw[:500],
+                    )
+                    raise RuntimeError(
+                        f"LLM extraction failed after {MAX_JSON_REPAIR_ATTEMPTS} repair attempts. "
+                        f"Last error: {last_err}\nLast response (truncated): {last_raw[:500]}"
+                    ) from last_err
+                messages.append({"role": "assistant", "content": last_raw or "(empty response)"})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Your response failed validation with this error:\n{exc}\n\n"
+                        "Return ONLY valid JSON that matches the schema. "
+                        "No markdown fences, no explanation, no preamble. "
+                        f"Schema:\n{schema_snippet}"
+                    ),
+                })
 
     def chat(
         self,
@@ -236,14 +340,23 @@ class LLMClient:
         }
         if settings.llm_send_seed:
             kwargs["seed"] = settings.llm_seed
-        rsp = self._client.chat.completions.create(**kwargs)
-        text = rsp.choices[0].message.content or ""
-        return LLMResult(
-            value=_StringWrap(text=text),
-            model=chosen_model,
-            prompt_hash=ph,
-            raw_response=rsp.model_dump(),
-        )
+        
+        try:
+            rsp = self._client.chat.completions.create(**kwargs)
+            text = rsp.choices[0].message.content or ""
+            return LLMResult(
+                value=_StringWrap(text=text),
+                model=chosen_model,
+                prompt_hash=ph,
+                raw_response=rsp.model_dump(),
+            )
+        except Exception as exc:
+            exc_str = str(exc)
+            if "402" in exc_str or "Payment Required" in exc_str:
+                raise RuntimeError(
+                    f"LLM provider quota exceeded (402 Payment Required from {settings.llm_provider})."
+                ) from exc
+            raise
 
     def vision(
         self,
@@ -293,8 +406,17 @@ class LLMClient:
         }
         if settings.llm_send_seed:
             kwargs["seed"] = settings.llm_seed
-        value = self._instructor.chat.completions.create(**kwargs)
-        return LLMResult(value=value, model=chosen_model, prompt_hash=ph)
+        
+        try:
+            value = self._instructor.chat.completions.create(**kwargs)
+            return LLMResult(value=value, model=chosen_model, prompt_hash=ph)
+        except Exception as exc:
+            exc_str = str(exc)
+            if "402" in exc_str or "Payment Required" in exc_str:
+                raise RuntimeError(
+                    f"LLM provider quota exceeded (402 Payment Required from {settings.llm_provider})."
+                ) from exc
+            raise
 
 
 class _StringWrap(BaseModel):
@@ -303,6 +425,10 @@ class _StringWrap(BaseModel):
 
 @lru_cache(maxsize=1)
 def get_llm_client() -> Any:
-    # Use GeminiClient by default as per Phase 4 requirements
-    from pramaan.llm.gemini_client import GeminiClient
-    return GeminiClient()
+    """Return the OpenAI-compatible client (Groq, OpenRouter, Ollama, …).
+
+    Structured extraction uses Instructor JSON mode plus a repair loop when
+    validation fails (Llama-class models).
+    """
+    return LLMClient()
+
